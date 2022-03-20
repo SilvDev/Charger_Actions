@@ -1,6 +1,6 @@
 /*
 *	Charger Actions
-*	Copyright (C) 2021 Silvers
+*	Copyright (C) 2022 Silvers
 *
 *	This program is free software: you can redistribute it and/or modify
 *	it under the terms of the GNU General Public License as published by
@@ -18,7 +18,7 @@
 
 
 
-#define PLUGIN_VERSION 		"1.8"
+#define PLUGIN_VERSION 		"1.9"
 
 /*=======================================================================================
 	Plugin Info:
@@ -31,6 +31,10 @@
 
 ========================================================================================
 	Change Log:
+
+1.9 (20-Mar-2022)
+	- Minor change to block pressing attack key when repeat charge is off.
+	- Updated GameData signatures to avoid breaking when detoured by the "Left4DHooks" plugin version 1.90 or newer.
 
 1.8 (14-Nov-2021)
 	- Changes to fix warnings when compiling on SourceMod 1.11.
@@ -806,6 +810,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 
 						buttons &= ~IN_ATTACK;
 						SetWeaponAttack(client, true, 1.0);
+						return Plugin_Changed;
 					}
 				}
 			}
