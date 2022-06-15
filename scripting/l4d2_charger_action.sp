@@ -18,7 +18,7 @@
 
 
 
-#define PLUGIN_VERSION 		"1.9"
+#define PLUGIN_VERSION 		"1.10"
 
 /*=======================================================================================
 	Plugin Info:
@@ -31,6 +31,9 @@
 
 ========================================================================================
 	Change Log:
+
+1.10 (15-Jun-2022)
+	- Fixed small mistake in coding when detecting incapacitated players.
 
 1.9 (20-Mar-2022)
 	- Minor change to block pressing attack key when repeat charge is off.
@@ -198,13 +201,13 @@ public void OnPluginStart()
 }
 
 /*
-public Action sm_char(int client, int args)
+Action sm_char(int client, int args)
 {
 	SDKCall(g_hSDK_Throw, client, GetClientAimTarget(client), 10.0, false);
 	return Plugin_Handled;
 }
 
-public Action sm_cha(int client, int args)
+Action sm_cha(int client, int args)
 {
 	float time = 5.0;
 	int ability = GetEntPropEnt(client, Prop_Send, "m_customAbility");
@@ -314,12 +317,12 @@ public void OnConfigsExecuted()
 	IsAllowed();
 }
 
-public void ConVarChanged_Allow(Handle convar, const char[] oldValue, const char[] newValue)
+void ConVarChanged_Allow(Handle convar, const char[] oldValue, const char[] newValue)
 {
 	IsAllowed();
 }
 
-public void ConVarChanged_Cvars(Handle convar, const char[] oldValue, const char[] newValue)
+void ConVarChanged_Cvars(Handle convar, const char[] oldValue, const char[] newValue)
 {
 	GetCvars();
 }
@@ -393,7 +396,7 @@ void ToggleDetour()
 	}
 }
 
-public MRESReturn HandleCustomCollision(Handle hReturn, Handle hParams)
+MRESReturn HandleCustomCollision(Handle hReturn, Handle hParams)
 {
 	int victim = DHookGetParam(hParams, 1);
 
@@ -486,7 +489,7 @@ void UnhookEvents()
 }
 
 // Grab survivor victim
-public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
+void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
 {
 	for( int i = 1; i <= MaxClients; i++ )
 	{
@@ -497,7 +500,7 @@ public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
 	}
 }
 
-public void Event_PlayerHurt(Event event, const char[] name, bool dontBroadcast)
+void Event_PlayerHurt(Event event, const char[] name, bool dontBroadcast)
 {
 	if( g_iCvarPickup )
 	{
@@ -553,7 +556,7 @@ public void Event_PlayerHurt(Event event, const char[] name, bool dontBroadcast)
 	}
 }
 
-public Action TimerTeleportTarget(Handle timer, int client)
+Action TimerTeleportTarget(Handle timer, int client)
 {
 	client = GetClientOfUserId(client);
 	if( client )
@@ -566,7 +569,7 @@ public Action TimerTeleportTarget(Handle timer, int client)
 			SetVariantString("lhand");
 			AcceptEntityInput(client, "SetParentAttachment");
 
-			if( GetEntPropEnt(client, Prop_Send, "m_isIncapacitated") )
+			if( GetEntProp(client, Prop_Send, "m_isIncapacitated") )
 				TeleportEntity(client, view_as<float>({ -10.0, -10.0, 5.0 }), NULL_VECTOR, NULL_VECTOR);
 			else
 				TeleportEntity(client, view_as<float>({ -15.0, 10.0, 5.0 }), NULL_VECTOR, NULL_VECTOR);
@@ -579,7 +582,7 @@ public Action TimerTeleportTarget(Handle timer, int client)
 
 
 // Release charger victim
-public void Event_PlayerShoved(Event event, const char[] name, bool dontBroadcast)
+void Event_PlayerShoved(Event event, const char[] name, bool dontBroadcast)
 {
 	if( g_iCvarShove )
 	{
@@ -622,7 +625,7 @@ public void Event_PlayerShoved(Event event, const char[] name, bool dontBroadcas
 	}
 }
 
-public void Event_CarryStart(Event event, const char[] name, bool dontBroadcast)
+void Event_CarryStart(Event event, const char[] name, bool dontBroadcast)
 {
 	if( g_iCvarDamage )
 	{
@@ -637,7 +640,7 @@ public void Event_CarryStart(Event event, const char[] name, bool dontBroadcast)
 	}
 }
 
-public void Event_ChargeStart(Event event, const char[] name, bool dontBroadcast)
+void Event_ChargeStart(Event event, const char[] name, bool dontBroadcast)
 {
 	int client = GetClientOfUserId(event.GetInt("userid"));
 	g_iJumped[client] = 0;
@@ -649,7 +652,7 @@ public void Event_ChargeStart(Event event, const char[] name, bool dontBroadcast
 	#endif
 }
 
-public void Event_ChargeStop(Event event, const char[] name, bool dontBroadcast)
+void Event_ChargeStop(Event event, const char[] name, bool dontBroadcast)
 {
 	int client = GetClientOfUserId(event.GetInt("userid"));
 
@@ -663,7 +666,7 @@ public void Event_ChargeStop(Event event, const char[] name, bool dontBroadcast)
 	g_bCharging[client] = false;
 }
 
-public void Event_PummelStart(Event event, const char[] name, bool dontBroadcast)
+void Event_PummelStart(Event event, const char[] name, bool dontBroadcast)
 {
 	// DROP AFTER CHARGE
 	if( g_iCvarFinish & (1<<0) )
@@ -870,7 +873,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 	return Plugin_Continue;
 }
 
-public void OnNext(int client)
+void OnNext(int client)
 {
 	if( (client = GetClientOfUserId(client)) && g_bCharging[client] )
 	{
@@ -927,7 +930,7 @@ void DropVictim(int client, int target, int stagger = 3) // 1 = Charger, 2 = Sur
 	g_fThrown[target] = GetGameTime() + 0.5;
 }
 
-public Action TimerFixAnim(Handle t, int target)
+Action TimerFixAnim(Handle t, int target)
 {
 	target = GetClientOfUserId(target);
 	if( target && IsPlayerAlive(target) )
