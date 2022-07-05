@@ -18,7 +18,7 @@
 
 
 
-#define PLUGIN_VERSION 		"1.10"
+#define PLUGIN_VERSION 		"1.11"
 
 /*=======================================================================================
 	Plugin Info:
@@ -31,6 +31,9 @@
 
 ========================================================================================
 	Change Log:
+
+1.11 (05-Jul-2022)
+	- Fixed invalid entity error caused by some 3rd party plugins. Thanks to "Voevoda" for reporting.
 
 1.10 (15-Jun-2022)
 	- Fixed small mistake in coding when detecting incapacitated players.
@@ -930,7 +933,7 @@ void DropVictim(int client, int target, int stagger = 3) // 1 = Charger, 2 = Sur
 	g_fThrown[target] = GetGameTime() + 0.5;
 }
 
-Action TimerFixAnim(Handle t, int target)
+Action TimerFixAnim(Handle timer, int target)
 {
 	target = GetClientOfUserId(target);
 	if( target && IsPlayerAlive(target) )
@@ -957,8 +960,11 @@ void SetWeaponAttack(int client, bool primary, float time)
 	if( primary )
 	{
 		int ability = GetEntPropEnt(client, Prop_Send, "m_customAbility");
-		if( GetEntPropFloat(ability, Prop_Send, "m_timestamp") < GetGameTime() + time )
-			SetEntPropFloat(ability, Prop_Send, "m_timestamp", GetGameTime() + time);
+		if( ability != -1 )
+		{
+			if( GetEntPropFloat(ability, Prop_Send, "m_timestamp") < GetGameTime() + time )
+				SetEntPropFloat(ability, Prop_Send, "m_timestamp", GetGameTime() + time);
+		}
 	}
 
 	int weapon = GetPlayerWeaponSlot(client, 0);
