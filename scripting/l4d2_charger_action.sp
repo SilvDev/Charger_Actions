@@ -1,6 +1,6 @@
 /*
 *	Charger Actions
-*	Copyright (C) 2022 Silvers
+*	Copyright (C) 2023 Silvers
 *
 *	This program is free software: you can redistribute it and/or modify
 *	it under the terms of the GNU General Public License as published by
@@ -18,7 +18,7 @@
 
 
 
-#define PLUGIN_VERSION 		"1.11"
+#define PLUGIN_VERSION 		"1.12"
 
 /*=======================================================================================
 	Plugin Info:
@@ -31,6 +31,12 @@
 
 ========================================================================================
 	Change Log:
+
+1.12 (10-Feb-2023)
+	- Added cvar "l4d2_charger_incapped" to automatically pick up incapacitated Survivors when Charging over them. Requested by "Voevoda"
+	- Picking up an incapacitated Survivor now shows the carry animation on the Survivor.
+	- Fixed the 3rd person view positioning of a carried survivor. This will somewhat obscure the Chargers 1st person view unfortunately.
+	- Fixed punching whilst Charging allowing to steer for a split second. Thanks to "alasfourom" for reporting.
 
 1.11 (05-Jul-2022)
 	- Fixed invalid entity error caused by some 3rd party plugins. Thanks to "Voevoda" for reporting.
@@ -76,7 +82,7 @@
 
 1.1 (10-Oct-2019)
 	- Added cvar "l4d2_charger_bots" to control if bots can grab or push survivors when Charging.
-	- Fixed not being able to pickup Survivors during Charging.
+	- Fixed not being able to pick up Survivors during Charging.
 
 1.0.2 (10-Sep-2019)
 	- Removed PrintToChatAll "Attack time" debug spew...
@@ -120,13 +126,16 @@ static const char g_Sounds[3][] =
 	"player/charger/hit/charger_smash_03.wav"
 };
 
-ConVar g_hCvarAllow, g_hCvarBots, g_hCvarCharge, g_hCvarDamage, g_hCvarFinish, g_hCvarJump, g_hCvarJumps, g_hCvarPickup, g_hCvarPummel, g_hCvarPunch, g_hCvarRepeat, g_hCvarShove, g_hCvarInterval;
+ConVar g_hCvarAllow, g_hCvarBots, g_hCvarCharge, g_hCvarDamage, g_hCvarFinish, g_hCvarIncap, g_hCvarJump, g_hCvarJumps, g_hCvarPickup, g_hCvarPummel, g_hCvarPunch, g_hCvarRepeat, g_hCvarShove, g_hCvarInterval;
 int g_iCvarBots, g_iCvarCharge, g_iCvarDamage, g_iCvarFinish, g_iCvarJump, g_iCvarJumps, g_iCvarPickup, g_iCvarPummel, g_iCvarPunch, g_iCvarRepeat, g_iCvarShove, g_iCvarInterval;
-bool g_bCvarAllow;
+bool g_bCvarAllow, g_bCvarIncap;
 
 Handle g_hSDK_Throw, g_hSDK_QueuePummelVictim, g_hSDK_OnPummelEnded, g_hSDK_OnStartCarryingVictim;
 Handle g_hDetourCollision;
+Handle g_hChargerIncap[MAXPLAYERS+1];
 bool g_bCharging[MAXPLAYERS+1];
+bool g_bIncapped[MAXPLAYERS+1];
+bool g_bPunched[MAXPLAYERS+1];
 float g_fCharge[MAXPLAYERS+1];
 float g_fThrown[MAXPLAYERS+1];
 float g_fPunch[MAXPLAYERS+1];
@@ -172,14 +181,15 @@ public void OnPluginStart()
 	g_hCvarBots =	CreateConVar(		"l4d2_charger_bots",		"1",	"Bots can: 0=Grab survivor on contact (game default). 1=Fling survivors on contact instead of grab. 2=Random choice.", CVAR_FLAGS);
 	g_hCvarCharge =	CreateConVar(		"l4d2_charger_charge",		"1",	"Humans can: 0=Grab survivor on contact (game default). 1=Fling survivors on contact instead of grab.", CVAR_FLAGS);
 	g_hCvarDamage =	CreateConVar(		"l4d2_charger_damage",		"10",	"Amount of damage to deal on collision when hitting or grabbing a survivor.", CVAR_FLAGS);
-	g_hCvarFinish =	CreateConVar(		"l4d2_charger_finish",		"3",	"After carrying and charging: 0=Pummel (game default). 1=Drop survivor. 2=Drop when a carried survivor is incapped. 3=Both 1 and 2. 4=Continue to carry.", CVAR_FLAGS);
+	g_hCvarFinish =	CreateConVar(		"l4d2_charger_finish",		"3",	"After carrying and charging: 0=Pummel (game default). 1=Drop survivor. 2=Drop when a carried survivor is incapacitated. 3=Both 1 and 2. 4=Continue to carry.", CVAR_FLAGS);
+	g_hCvarIncap =	CreateConVar(		"l4d2_charger_incapped",	"1",	"Allow chargers to automatically pick up incapacitated players whilst charging over them. 0=Off. 1=On.", CVAR_FLAGS);
 	g_hCvarJump =	CreateConVar(		"l4d2_charger_jump",		"2",	"Allow chargers to jump while charging. 0=Off. 1=When alone. 2=Also when carrying a survivor.", CVAR_FLAGS);
 	g_hCvarJumps =	CreateConVar(		"l4d2_charger_jumps",		"0",	"0=Unlimited. Maximum number of jumps per charge.", CVAR_FLAGS);
 	g_hCvarPickup =	CreateConVar(		"l4d2_charger_pickup",		"31",	"Allow chargers to carry and drop survivors with the melee button (RMB). 0=Off. 1=Grab Incapped. 2=Grab Standing. 4=Drop Incapped. 8=Drop Standing. 16=Grab while charging (requires l4d2_charger_punch cvar). Add numbers together.", CVAR_FLAGS);
 	g_hCvarPummel =	CreateConVar(		"l4d2_charger_pummel",		"2",	"Allow pummel to be started and stopped while carrying a survivor (LMB) or Scope/Zoom (MMB/M3) when l4d2_charger_repeat is on. 0=Off. 1=Incapped only. 2=Any survivor.", CVAR_FLAGS);
 	g_hCvarPunch =	CreateConVar(		"l4d2_charger_punch",		"1",	"0=Off. 1=Allow punching while charging.", CVAR_FLAGS);
 	g_hCvarRepeat =	CreateConVar(		"l4d2_charger_repeat",		"0",	"0=Off. 1=Allow charging while carrying either after charging or after grabbing a survivor and after the charge meter has refilled.", CVAR_FLAGS);
-	g_hCvarShove =	CreateConVar(		"l4d2_charger_shove",		"7",	"Survivors can shove chargers to release pummeled victims. 0=Off. 1=Release only. 2=Stumble survivor. 4=Stumble charger. 7=All. Add numbers together.", CVAR_FLAGS);
+	g_hCvarShove =	CreateConVar(		"l4d2_charger_shove",		"7",	"Survivors can shove chargers to release pummelled victims. 0=Off. 1=Release only. 2=Stumble survivor. 4=Stumble charger. 7=All. Add numbers together.", CVAR_FLAGS);
 	CreateConVar(						"l4d2_charger_version",		PLUGIN_VERSION,	"Charger Actions plugin version.", FCVAR_NOTIFY|FCVAR_DONTRECORD);
 	AutoExecConfig(true,				"l4d2_charger_action");
 
@@ -190,6 +200,7 @@ public void OnPluginStart()
 	g_hCvarCharge.AddChangeHook(ConVarChanged_Cvars);
 	g_hCvarDamage.AddChangeHook(ConVarChanged_Cvars);
 	g_hCvarFinish.AddChangeHook(ConVarChanged_Cvars);
+	g_hCvarIncap.AddChangeHook(ConVarChanged_Cvars);
 	g_hCvarJump.AddChangeHook(ConVarChanged_Cvars);
 	g_hCvarJumps.AddChangeHook(ConVarChanged_Cvars);
 	g_hCvarPickup.AddChangeHook(ConVarChanged_Cvars);
@@ -310,6 +321,19 @@ public void OnMapStart()
 	}
 }
 
+public void OnMapEnd()
+{
+	for( int i = 1; i <= MaxClients; i++ )
+	{
+		delete g_hChargerIncap[i];
+	}
+}
+
+public void OnClientDisconnect(int client)
+{
+	delete g_hChargerIncap[client];
+}
+
 
 
 // ====================================================================================================
@@ -333,6 +357,7 @@ void ConVarChanged_Cvars(Handle convar, const char[] oldValue, const char[] newV
 void GetCvars()
 {
 	g_iCvarFinish	= g_hCvarFinish.IntValue;
+	g_bCvarIncap	= g_hCvarIncap.BoolValue;
 	g_iCvarBots		= g_hCvarBots.IntValue;
 	g_iCvarCharge	= g_hCvarCharge.IntValue;
 	g_iCvarDamage	= g_hCvarDamage.IntValue;
@@ -355,6 +380,8 @@ void IsAllowed()
 
 	if( g_bCvarAllow == false && bAllowCvar == true )
 	{
+		AddCommandListener(OnJoinTeam, "jointeam");
+
 		HookEvents();
 		g_bCvarAllow = true;
 		ToggleDetour();
@@ -362,6 +389,8 @@ void IsAllowed()
 
 	else if( g_bCvarAllow == true && bAllowCvar == false )
 	{
+		RemoveCommandListener(OnJoinTeam, "jointeam");
+
 		UnhookEvents();
 		g_bCvarAllow = false;
 		ToggleDetour();
@@ -472,11 +501,14 @@ void HookEvents()
 	HookEvent("round_start",				Event_RoundStart);
 	HookEvent("player_hurt",				Event_PlayerHurt);
 	HookEvent("player_shoved",				Event_PlayerShoved);
+	HookEvent("player_spawn",				Event_PlayerSpawn);
+	HookEvent("revive_success",				Event_PlayerRevive);
+	HookEvent("charger_pummel_end",			Event_PummelEnd);
 	HookEvent("charger_carry_start",		Event_CarryStart);
-	HookEvent("charger_charge_start",		Event_ChargeStart);
 	HookEvent("charger_charge_end",			Event_ChargeStop);
 	HookEvent("charger_pummel_start",		Event_PummelStart);
 	HookEvent("player_incapacitated",		Event_PlayerIncap);
+	HookEvent("charger_charge_start",		Event_ChargeStart);
 }
 
 void UnhookEvents()
@@ -484,11 +516,14 @@ void UnhookEvents()
 	UnhookEvent("round_start",				Event_RoundStart);
 	UnhookEvent("player_hurt",				Event_PlayerHurt);
 	UnhookEvent("player_shoved",			Event_PlayerShoved);
+	UnhookEvent("player_spawn",				Event_PlayerSpawn);
+	UnhookEvent("revive_success",			Event_PlayerRevive);
+	UnhookEvent("charger_pummel_end",		Event_PummelEnd);
 	UnhookEvent("charger_carry_start",		Event_CarryStart);
-	UnhookEvent("charger_charge_start",		Event_ChargeStart);
 	UnhookEvent("charger_charge_end",		Event_ChargeStop);
 	UnhookEvent("charger_pummel_start",		Event_PummelStart);
 	UnhookEvent("player_incapacitated",		Event_PlayerIncap);
+	UnhookEvent("charger_charge_start",		Event_ChargeStart);
 }
 
 // Grab survivor victim
@@ -497,6 +532,7 @@ void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
 	for( int i = 1; i <= MaxClients; i++ )
 	{
 		g_bCharging[i] = false;
+		g_bIncapped[i] = false;
 		g_fCharge[i] = 0.0;
 		g_fThrown[i] = 0.0;
 		g_fPunch[i] = 0.0;
@@ -539,26 +575,34 @@ void Event_PlayerHurt(Event event, const char[] name, bool dontBroadcast)
 					return;
 				}
 
-				int incap = GetEntProp(target, Prop_Send, "m_isIncapacitated");
+				bool incap = GetEntProp(target, Prop_Send, "m_isIncapacitated", 1) == 1;
 
 				// CARRY INCAP / CARRY STANDING
-				if( (incap == 1 && g_iCvarPickup & (1<<0)) || (incap == 0 && g_iCvarPickup & (1<<1)) )
+				if( (incap && g_iCvarPickup & (1<<0)) || (!incap && g_iCvarPickup & (1<<1)) )
 				{
 					#if DEBUG
 					PrintToServer("Charger: Grab %s: %N", incap ? "incap" : "stand", target);
 					#endif
 
+					g_bIncapped[target] = incap;
+					if( incap )
+					{
+						SetEntProp(target, Prop_Send, "m_isIncapacitated", 0, 1);
+					}
+
 					g_fThrown[client] = GetGameTime() + 0.8;
 					SetWeaponAttack(client, true, 0.8);
 					SetWeaponAttack(client, false, 0.8);
 					SDKCall(g_hSDK_OnStartCarryingVictim, client, target);
-					CreateTimer(0.3, TimerTeleportTarget, GetClientUserId(target));
+					// CreateTimer(0.3, TimerTeleportTarget, GetClientUserId(target));
 				}
 			}
 		}
 	}
 }
 
+// Unused, old method
+/*
 Action TimerTeleportTarget(Handle timer, int client)
 {
 	client = GetClientOfUserId(client);
@@ -572,17 +616,62 @@ Action TimerTeleportTarget(Handle timer, int client)
 			SetVariantString("lhand");
 			AcceptEntityInput(client, "SetParentAttachment");
 
-			if( GetEntProp(client, Prop_Send, "m_isIncapacitated") )
+			if( GetEntProp(client, Prop_Send, "m_isIncapacitated", 1) )
 				TeleportEntity(client, view_as<float>({ -10.0, -10.0, 5.0 }), NULL_VECTOR, NULL_VECTOR);
 			else
-				TeleportEntity(client, view_as<float>({ -15.0, 10.0, 5.0 }), NULL_VECTOR, NULL_VECTOR);
+			TeleportEntity(client, view_as<float>({ -15.0, 10.0, 5.0 }), NULL_VECTOR, NULL_VECTOR);
+			// TeleportEntity(client, view_as<float>({ 1.0, 1.0, 1.0 }), NULL_VECTOR, NULL_VECTOR);
+		}
+	}
+
+	return Plugin_Continue;
+}
+// */
+
+// Fix team change freezing client
+Action OnJoinTeam(int client, const char[] command, int args)
+{
+	if( client && IsClientInGame(client) && IsCharger(client) )
+	{
+		int target = GetEntPropEnt(client, Prop_Send, "m_pummelVictim");
+		if( target != -1 && IsClientInGame(target) )
+		{
+			DropVictim(client, target, 0);
+		}
+		else
+		{
+			target = GetEntPropEnt(client, Prop_Send, "m_carryVictim");
+			if( target != -1 && IsClientInGame(target) )
+			{
+				DropVictim(client, target, 0);
+			}
 		}
 	}
 
 	return Plugin_Continue;
 }
 
+// Reset incapped bool
+void Event_PlayerSpawn(Event event, const char[] name, bool dontBroadcast)
+{
+	int client = GetClientOfUserId(event.GetInt("userid"));
+	g_bIncapped[client] = false;
+}
 
+void Event_PlayerRevive(Event event, const char[] name, bool dontBroadcast)
+{
+	int client = GetClientOfUserId(event.GetInt("subject"));
+	g_bIncapped[client] = false;
+}
+
+void Event_PummelEnd(Event event, const char[] name, bool dontBroadcast)
+{
+	int client = GetClientOfUserId(event.GetInt("victim"));
+	if( g_bIncapped[client] )
+	{
+		SetEntProp(client, Prop_Send, "m_isIncapacitated", 1, 1);
+	}
+}
 
 // Release charger victim
 void Event_PlayerShoved(Event event, const char[] name, bool dontBroadcast)
@@ -643,18 +732,6 @@ void Event_CarryStart(Event event, const char[] name, bool dontBroadcast)
 	}
 }
 
-void Event_ChargeStart(Event event, const char[] name, bool dontBroadcast)
-{
-	int client = GetClientOfUserId(event.GetInt("userid"));
-	g_iJumped[client] = 0;
-	g_bCharging[client] = true;
-	g_fCharge[client] = GetGameTime();
-
-	#if DEBUG
-	PrintToServer("Charger: Event_ChargeStart %d", client);
-	#endif
-}
-
 void Event_ChargeStop(Event event, const char[] name, bool dontBroadcast)
 {
 	int client = GetClientOfUserId(event.GetInt("userid"));
@@ -689,7 +766,9 @@ void Event_PummelStart(Event event, const char[] name, bool dontBroadcast)
 				DropVictim(client, target, 0); // Drop after charge
 			}
 		}
-	} else if( g_iCvarFinish == 4 ) {
+	}
+	else if( g_iCvarFinish == 4 )
+	{
 		int client = GetClientOfUserId(event.GetInt("userid"));
 		if( GetGameTime() > g_fThrown[client] )
 		{
@@ -698,9 +777,15 @@ void Event_PummelStart(Event event, const char[] name, bool dontBroadcast)
 			SetEntPropEnt(target, Prop_Send, "m_carryAttacker", -1);
 			SDKCall(g_hSDK_OnPummelEnded, client, "", target);
 
+			g_bIncapped[target] = GetEntProp(target, Prop_Send, "m_isIncapacitated", 1) == 1;
+			if( g_bIncapped[target] )
+			{
+				SetEntProp(target, Prop_Send, "m_isIncapacitated", 0, 1);
+			}
+
 			g_fThrown[client] = GetGameTime() + 0.8;
 			SDKCall(g_hSDK_OnStartCarryingVictim, client, target);
-			CreateTimer(0.3, TimerTeleportTarget, GetClientUserId(target));
+			// CreateTimer(0.3, TimerTeleportTarget, GetClientUserId(target));
 
 			float time = g_iCvarInterval - (GetGameTime() - g_fCharge[client]);
 			if( time < 1.0 ) time = 1.0;
@@ -711,7 +796,7 @@ void Event_PummelStart(Event event, const char[] name, bool dontBroadcast)
 	}
 }
 
-public void Event_PlayerIncap(Event event, const char[] name, bool dontBroadcast)
+void Event_PlayerIncap(Event event, const char[] name, bool dontBroadcast)
 {
 	if( g_iCvarFinish & (1<<1) )
 	{
@@ -727,6 +812,70 @@ public void Event_PlayerIncap(Event event, const char[] name, bool dontBroadcast
 			DropVictim(client, target); // Drop after charge
 		}
 	}
+}
+
+
+
+// ====================================================================================================
+//					AUTO PICK UP INCAPPED
+// ====================================================================================================
+void Event_ChargeStart(Event event, const char[] name, bool dontBroadcast)
+{
+	int userid = event.GetInt("userid");
+	int client = GetClientOfUserId(userid);
+	g_iJumped[client] = 0;
+	g_bCharging[client] = true;
+	g_fCharge[client] = GetGameTime();
+
+	// Auto pick up
+	delete g_hChargerIncap[client];
+
+	if( g_bCvarIncap )
+	{
+		g_hChargerIncap[client] = CreateTimer(0.1, TimerChargeIncap, userid, TIMER_REPEAT);
+	}
+
+	#if DEBUG
+	PrintToServer("Charger: Event_ChargeStart %d", client);
+	#endif
+}
+
+Action TimerChargeIncap(Handle timer, any client)
+{
+	client = GetClientOfUserId(client);
+	if( client && g_bCharging[client] && IsClientInGame(client) && GetEntPropEnt(client, Prop_Send, "m_carryVictim") == -1 )
+	{
+		float vLoc[3], vPos[3];
+		GetClientAbsOrigin(client, vLoc);
+
+		for( int target = 1; target <= MaxClients; target++ )
+		{
+			if( IsClientInGame(target) && GetClientTeam(target) == 2 && IsPlayerAlive(target) && GetEntProp(target, Prop_Send, "m_isIncapacitated", 1) && GetEntProp(target, Prop_Send, "m_isHangingFromLedge", 1) == 0 )
+			{
+				GetClientAbsOrigin(target, vPos);
+				if( GetVectorDistance(vLoc, vPos) <= 50.0 )
+				{
+					g_bIncapped[target] = true;
+					SetEntProp(target, Prop_Send, "m_isIncapacitated", 0, 1);
+
+					g_fThrown[client] = GetGameTime() + 0.8;
+					SetWeaponAttack(client, true, 0.8);
+					SetWeaponAttack(client, false, 0.8);
+					SDKCall(g_hSDK_OnStartCarryingVictim, client, target);
+					// CreateTimer(0.3, TimerTeleportTarget, GetClientUserId(target));
+
+					g_hChargerIncap[client] = null;
+
+					return Plugin_Stop;
+				}
+			}
+		}
+
+		return Plugin_Continue;
+	}
+
+	g_hChargerIncap[client] = null;
+	return Plugin_Stop;
 }
 
 
@@ -779,7 +928,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 					PrintToServer("Charger: Pummel try %N", target);
 					#endif
 
-					if( g_iCvarPummel == 2 || (g_iCvarPummel == 1 && GetEntProp(target, Prop_Send, "m_isIncapacitated") == 1) )
+					if( g_iCvarPummel == 2 || (g_iCvarPummel == 1 && GetEntProp(target, Prop_Send, "m_isIncapacitated", 1) == 1) )
 					{
 						if( CanWeaponAttack(client, false) )
 						{
@@ -790,6 +939,12 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 								#endif
 
 								g_fThrown[client] = GetGameTime() + 0.5;
+
+								if( g_bIncapped[target] )
+								{
+									SetEntProp(target, Prop_Send, "m_isIncapacitated", 1, 1);
+								}
+
 								SDKCall(g_hSDK_QueuePummelVictim, client, target, -1.0);
 								SetWeaponAttack(client, true, 0.5);
 								SetWeaponAttack(client, false, 1.0);
@@ -838,7 +993,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 				target = target != -1 ? target : victim;
 				if( target != -1 && IsClientInGame(target) )
 				{
-					if( (GetEntProp(target, Prop_Send, "m_isIncapacitated") == 1 && g_iCvarPickup & (1<<2)) || g_iCvarPickup & (1<<3) )
+					if( (GetEntProp(target, Prop_Send, "m_isIncapacitated", 1) == 1 && g_iCvarPickup & (1<<2)) || g_iCvarPickup & (1<<3) )
 					{
 						#if DEBUG
 						PrintToServer("Charger: Carry drop pass. Time: %f / Cur: %f. (%N)", g_fThrown[client], GetGameTime(), target);
@@ -866,7 +1021,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 					if( GetEntProp(client, Prop_Send, "m_fFlags") & FL_FROZEN ) // Only remove and reset if not already removed by the "Charger Steering" plugin.
 					{
 						SetEntProp(client, Prop_Send, "m_fFlags", GetEntProp(client, Prop_Send, "m_fFlags") & ~FL_FROZEN);
-						RequestFrame(OnNext, GetClientUserId(client));
+						g_bPunched[client] = true;
 					}
 				}
 			}
@@ -876,10 +1031,11 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 	return Plugin_Continue;
 }
 
-void OnNext(int client)
+public void OnPlayerRunCmdPost(int client, int buttons, int impulse)
 {
-	if( (client = GetClientOfUserId(client)) && g_bCharging[client] )
+	if( g_bPunched[client] )
 	{
+		g_bPunched[client] = false;
 		SetEntProp(client, Prop_Send, "m_fFlags", GetEntProp(client, Prop_Send, "m_fFlags") | FL_FROZEN);
 	}
 }
@@ -907,8 +1063,15 @@ void DropVictim(int client, int target, int stagger = 3) // 1 = Charger, 2 = Sur
 	SetEntPropEnt(client, Prop_Send, "m_carryVictim", -1);
 	SetEntPropEnt(target, Prop_Send, "m_carryAttacker", -1);
 
+	bool incap = GetEntProp(target, Prop_Send, "m_isIncapacitated", 1) == 1;
 	float vPos[3];
-	vPos[0] = GetEntProp(target, Prop_Send, "m_isIncapacitated") == 1 ? 20.0 : 50.0;
+
+	if( g_bIncapped[target] && !incap )
+	{
+		SetEntProp(target, Prop_Send, "m_isIncapacitated", 1, 1);
+	}
+
+	vPos[0] = incap ? 20.0 : 50.0;
 	SetVariantString("!activator");
 	AcceptEntityInput(target, "SetParent", client);
 	TeleportEntity(target, vPos, NULL_VECTOR, NULL_VECTOR);
@@ -916,6 +1079,18 @@ void DropVictim(int client, int target, int stagger = 3) // 1 = Charger, 2 = Sur
 
 	// Fix stuck in flying animation bug, 0.3 seems enough to cover, any earlier may not always detect the falling anim
 	CreateTimer(0.3, TimerFixAnim, GetClientUserId(target));
+
+	// Event
+	Event hEvent = CreateEvent("charger_carry_end");
+	if( hEvent )
+	{
+		hEvent.SetInt("userid", GetClientUserId(client));
+		hEvent.SetInt("victim", GetClientUserId(target));
+		hEvent.Fire();
+	}
+
+	SetEntityMoveType(client, MOVETYPE_WALK);
+	SetEntityMoveType(target, MOVETYPE_WALK);
 
 	// Stagger
 	if( stagger & (1<<0) )
@@ -939,6 +1114,7 @@ Action TimerFixAnim(Handle timer, int target)
 	if( target && IsPlayerAlive(target) )
 	{
 		int seq = GetEntProp(target, Prop_Send, "m_nSequence");
+		// "ACT_TERROR_FALL" sequence number
 		if( seq == 650 || seq == 665 || seq == 661 || seq == 651 || seq == 554 || seq == 551 ) // Coach, Ellis, Nick, Rochelle, Francis/Zoey, Bill/Louis
 		{
 			#if DEBUG
