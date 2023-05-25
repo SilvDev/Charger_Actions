@@ -18,7 +18,7 @@
 
 
 
-#define PLUGIN_VERSION 		"1.12"
+#define PLUGIN_VERSION 		"1.13"
 
 /*=======================================================================================
 	Plugin Info:
@@ -31,6 +31,10 @@
 
 ========================================================================================
 	Change Log:
+
+1.13 (25-May-2023)
+	- Changed cvar "l4d2_charger_incapped" to control if the Charger can pickup incapped players who are pinned while charging. Requested by "fortheloveof98".
+	- Fixed incapped players being revived when a Charger carrying them dies. Thanks to "Mosey" for reporting.
 
 1.12 (10-Feb-2023)
 	- Added cvar "l4d2_charger_incapped" to automatically pick up incapacitated Survivors when Charging over them. Requested by "Voevoda"
@@ -127,8 +131,8 @@ static const char g_Sounds[3][] =
 };
 
 ConVar g_hCvarAllow, g_hCvarBots, g_hCvarCharge, g_hCvarDamage, g_hCvarFinish, g_hCvarIncap, g_hCvarJump, g_hCvarJumps, g_hCvarPickup, g_hCvarPummel, g_hCvarPunch, g_hCvarRepeat, g_hCvarShove, g_hCvarInterval;
-int g_iCvarBots, g_iCvarCharge, g_iCvarDamage, g_iCvarFinish, g_iCvarJump, g_iCvarJumps, g_iCvarPickup, g_iCvarPummel, g_iCvarPunch, g_iCvarRepeat, g_iCvarShove, g_iCvarInterval;
-bool g_bCvarAllow, g_bCvarIncap;
+int g_iCvarBots, g_iCvarCharge, g_iCvarDamage, g_iCvarFinish, g_iCvarIncap, g_iCvarJump, g_iCvarJumps, g_iCvarPickup, g_iCvarPummel, g_iCvarPunch, g_iCvarRepeat, g_iCvarShove, g_iCvarInterval;
+bool g_bCvarAllow;
 
 Handle g_hSDK_Throw, g_hSDK_QueuePummelVictim, g_hSDK_OnPummelEnded, g_hSDK_OnStartCarryingVictim;
 Handle g_hDetourCollision;
@@ -182,7 +186,7 @@ public void OnPluginStart()
 	g_hCvarCharge =	CreateConVar(		"l4d2_charger_charge",		"1",	"Humans can: 0=Grab survivor on contact (game default). 1=Fling survivors on contact instead of grab.", CVAR_FLAGS);
 	g_hCvarDamage =	CreateConVar(		"l4d2_charger_damage",		"10",	"Amount of damage to deal on collision when hitting or grabbing a survivor.", CVAR_FLAGS);
 	g_hCvarFinish =	CreateConVar(		"l4d2_charger_finish",		"3",	"After carrying and charging: 0=Pummel (game default). 1=Drop survivor. 2=Drop when a carried survivor is incapacitated. 3=Both 1 and 2. 4=Continue to carry.", CVAR_FLAGS);
-	g_hCvarIncap =	CreateConVar(		"l4d2_charger_incapped",	"1",	"Allow chargers to automatically pick up incapacitated players whilst charging over them. 0=Off. 1=On.", CVAR_FLAGS);
+	g_hCvarIncap =	CreateConVar(		"l4d2_charger_incapped",	"1",	"Allow chargers to automatically pick up incapacitated players whilst charging over them. 0=Off. 1=On. 2=Only when not pinned by other Special Infected.", CVAR_FLAGS);
 	g_hCvarJump =	CreateConVar(		"l4d2_charger_jump",		"2",	"Allow chargers to jump while charging. 0=Off. 1=When alone. 2=Also when carrying a survivor.", CVAR_FLAGS);
 	g_hCvarJumps =	CreateConVar(		"l4d2_charger_jumps",		"0",	"0=Unlimited. Maximum number of jumps per charge.", CVAR_FLAGS);
 	g_hCvarPickup =	CreateConVar(		"l4d2_charger_pickup",		"31",	"Allow chargers to carry and drop survivors with the melee button (RMB). 0=Off. 1=Grab Incapped. 2=Grab Standing. 4=Drop Incapped. 8=Drop Standing. 16=Grab while charging (requires l4d2_charger_punch cvar). Add numbers together.", CVAR_FLAGS);
@@ -357,7 +361,7 @@ void ConVarChanged_Cvars(Handle convar, const char[] oldValue, const char[] newV
 void GetCvars()
 {
 	g_iCvarFinish	= g_hCvarFinish.IntValue;
-	g_bCvarIncap	= g_hCvarIncap.BoolValue;
+	g_iCvarIncap	= g_hCvarIncap.IntValue;
 	g_iCvarBots		= g_hCvarBots.IntValue;
 	g_iCvarCharge	= g_hCvarCharge.IntValue;
 	g_iCvarDamage	= g_hCvarDamage.IntValue;
@@ -504,6 +508,7 @@ void HookEvents()
 	HookEvent("player_spawn",				Event_PlayerSpawn);
 	HookEvent("revive_success",				Event_PlayerRevive);
 	HookEvent("charger_pummel_end",			Event_PummelEnd);
+	HookEvent("charger_carry_end",			Event_PummelEnd);
 	HookEvent("charger_carry_start",		Event_CarryStart);
 	HookEvent("charger_charge_end",			Event_ChargeStop);
 	HookEvent("charger_pummel_start",		Event_PummelStart);
@@ -519,6 +524,7 @@ void UnhookEvents()
 	UnhookEvent("player_spawn",				Event_PlayerSpawn);
 	UnhookEvent("revive_success",			Event_PlayerRevive);
 	UnhookEvent("charger_pummel_end",		Event_PummelEnd);
+	UnhookEvent("charger_carry_end",		Event_PummelEnd);
 	UnhookEvent("charger_carry_start",		Event_CarryStart);
 	UnhookEvent("charger_charge_end",		Event_ChargeStop);
 	UnhookEvent("charger_pummel_start",		Event_PummelStart);
@@ -830,7 +836,7 @@ void Event_ChargeStart(Event event, const char[] name, bool dontBroadcast)
 	// Auto pick up
 	delete g_hChargerIncap[client];
 
-	if( g_bCvarIncap )
+	if( g_iCvarIncap )
 	{
 		g_hChargerIncap[client] = CreateTimer(0.1, TimerChargeIncap, userid, TIMER_REPEAT);
 	}
@@ -852,6 +858,11 @@ Action TimerChargeIncap(Handle timer, any client)
 		{
 			if( IsClientInGame(target) && GetClientTeam(target) == 2 && IsPlayerAlive(target) && GetEntProp(target, Prop_Send, "m_isIncapacitated", 1) && GetEntProp(target, Prop_Send, "m_isHangingFromLedge", 1) == 0 )
 			{
+				if( g_iCvarIncap == 2 && (GetEntPropEnt(target, Prop_Send, "m_pounceAttacker") > 0 || GetEntPropEnt(target, Prop_Send, "m_pummelAttacker") > 0 || GetEntPropEnt(target, Prop_Send, "m_carryAttacker") > 0) )
+				{
+					continue;
+				}
+
 				GetClientAbsOrigin(target, vPos);
 				if( GetVectorDistance(vLoc, vPos) <= 50.0 )
 				{
