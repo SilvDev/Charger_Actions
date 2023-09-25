@@ -18,7 +18,7 @@
 
 
 
-#define PLUGIN_VERSION 		"1.13"
+#define PLUGIN_VERSION 		"1.14"
 
 /*=======================================================================================
 	Plugin Info:
@@ -31,6 +31,9 @@
 
 ========================================================================================
 	Change Log:
+
+1.14 (24-Sep-2023)
+	- Fixed not resetting variables causing some rare bugs. Thanks to "Voevoda" for reporting.
 
 1.13 (25-May-2023)
 	- Changed cvar "l4d2_charger_incapped" to control if the Charger can pickup incapped players who are pinned while charging. Requested by "fortheloveof98".
@@ -327,10 +330,7 @@ public void OnMapStart()
 
 public void OnMapEnd()
 {
-	for( int i = 1; i <= MaxClients; i++ )
-	{
-		delete g_hChargerIncap[i];
-	}
+	ResetPlugin();
 }
 
 public void OnClientDisconnect(int client)
@@ -533,16 +533,22 @@ void UnhookEvents()
 }
 
 // Grab survivor victim
-void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
+void ResetPlugin()
 {
 	for( int i = 1; i <= MaxClients; i++ )
 	{
+		delete g_hChargerIncap[i];
 		g_bCharging[i] = false;
 		g_bIncapped[i] = false;
 		g_fCharge[i] = 0.0;
 		g_fThrown[i] = 0.0;
 		g_fPunch[i] = 0.0;
 	}
+}
+
+void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
+{
+	ResetPlugin();
 }
 
 void Event_PlayerHurt(Event event, const char[] name, bool dontBroadcast)
@@ -556,8 +562,9 @@ void Event_PlayerHurt(Event event, const char[] name, bool dontBroadcast)
 			#endif
 
 			int client = GetClientOfUserId(event.GetInt("attacker"));
-			if( !client || IsFakeClient(client) ) return;
+			if( !client || IsFakeClient(client) || !IsCharger(client) ) return;
 			if( g_bCharging[client] && (g_iCvarPunch == 0 || g_iCvarPickup & (1<<4) == 0) ) return;
+
 			if( GetGameTime() < g_fThrown[client] )
 			{
 				#if DEBUG
