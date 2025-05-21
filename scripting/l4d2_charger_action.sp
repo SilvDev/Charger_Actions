@@ -1,6 +1,6 @@
 /*
 *	Charger Actions
-*	Copyright (C) 2023 Silvers
+*	Copyright (C) 2025 Silvers
 *
 *	This program is free software: you can redistribute it and/or modify
 *	it under the terms of the GNU General Public License as published by
@@ -18,7 +18,7 @@
 
 
 
-#define PLUGIN_VERSION 		"1.14"
+#define PLUGIN_VERSION 		"1.15"
 
 /*=======================================================================================
 	Plugin Info:
@@ -32,7 +32,10 @@
 ========================================================================================
 	Change Log:
 
-1.14 (24-Sep-2023)
+1.15 (21-May-2025)
+	- Fixed when a Charger becomes the Tank, to drop any Survivors being carried so they are not stuck. Thanks to "Voevoda" for reporting.
+
+1.14 (25-Sep-2023)
 	- Fixed not resetting variables causing some rare bugs. Thanks to "Voevoda" for reporting.
 
 1.13 (25-May-2023)
@@ -514,6 +517,7 @@ void HookEvents()
 	HookEvent("charger_pummel_start",		Event_PummelStart);
 	HookEvent("player_incapacitated",		Event_PlayerIncap);
 	HookEvent("charger_charge_start",		Event_ChargeStart);
+	HookEvent("player_bot_replace",			Event_Player_Replaced);
 }
 
 void UnhookEvents()
@@ -530,6 +534,7 @@ void UnhookEvents()
 	UnhookEvent("charger_pummel_start",		Event_PummelStart);
 	UnhookEvent("player_incapacitated",		Event_PlayerIncap);
 	UnhookEvent("charger_charge_start",		Event_ChargeStart);
+	UnhookEvent("player_bot_replace",		Event_Player_Replaced);
 }
 
 // Grab survivor victim
@@ -574,7 +579,7 @@ void Event_PlayerHurt(Event event, const char[] name, bool dontBroadcast)
 			}
 
 			int target = GetClientOfUserId(event.GetInt("userid"));
-			if( client && target && target <= MaxClients && GetGameTime() > g_fThrown[target] && IsCharger(client) && IsSurvivor(target) )
+			if( client && target && target <= MaxClients && GetGameTime() > g_fThrown[target] && IsSurvivor(target) )
 			{
 				#if DEBUG
 				PrintToServer("Charger: club %N from %N", GetClientOfUserId(event.GetInt("userid")), client);
@@ -661,14 +666,17 @@ Action OnJoinTeam(int client, const char[] command, int args)
 		}
 	}
 
+	g_bCharging[client] = false;
+
 	return Plugin_Continue;
 }
 
-// Reset incapped bool
+// Reset bools
 void Event_PlayerSpawn(Event event, const char[] name, bool dontBroadcast)
 {
 	int client = GetClientOfUserId(event.GetInt("userid"));
 	g_bIncapped[client] = false;
+	g_bCharging[client] = false;
 }
 
 void Event_PlayerRevive(Event event, const char[] name, bool dontBroadcast)
@@ -856,7 +864,7 @@ void Event_ChargeStart(Event event, const char[] name, bool dontBroadcast)
 Action TimerChargeIncap(Handle timer, any client)
 {
 	client = GetClientOfUserId(client);
-	if( client && g_bCharging[client] && IsClientInGame(client) && GetEntPropEnt(client, Prop_Send, "m_carryVictim") == -1 )
+	if( client && g_bCharging[client] && IsClientInGame(client) && GetEntPropEnt(client, Prop_Send, "m_carryVictim") == -1 && IsCharger(client) )
 	{
 		float vLoc[3], vPos[3];
 		GetClientAbsOrigin(client, vLoc);
@@ -892,6 +900,7 @@ Action TimerChargeIncap(Handle timer, any client)
 		return Plugin_Continue;
 	}
 
+	g_bCharging[client] = false;
 	g_hChargerIncap[client] = null;
 	return Plugin_Stop;
 }
@@ -1055,6 +1064,33 @@ public void OnPlayerRunCmdPost(int client, int buttons, int impulse)
 	{
 		g_bPunched[client] = false;
 		SetEntProp(client, Prop_Send, "m_fFlags", GetEntProp(client, Prop_Send, "m_fFlags") | FL_FROZEN);
+	}
+}
+
+
+
+// ====================================================================================================
+//					TANK FIX
+// ====================================================================================================
+void Event_Player_Replaced(Event event, const char[] name, bool dontBroadcast)
+{
+	int client = GetClientOfUserId(event.GetInt("bot"));
+
+	if( client && IsClientInGame(client) && IsCharger(client) )
+	{
+		int target = GetEntPropEnt(client, Prop_Send, "m_pummelVictim");
+		if( target != -1 && IsClientInGame(target) )
+		{
+			DropVictim(client, target, 0);
+		}
+		else
+		{
+			target = GetEntPropEnt(client, Prop_Send, "m_carryVictim");
+			if( target != -1 && IsClientInGame(target) )
+			{
+				DropVictim(client, target, 0);
+			}
+		}
 	}
 }
 
